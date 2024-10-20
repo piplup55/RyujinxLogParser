@@ -128,22 +128,15 @@ function RyuParseLogFile(logData) {
             const os = line.split('Operating System:')[1].trim();
             analysedLog.hardware_info.os = os;
     
-            // Log the detected OS
-            debug(`Detected OS: ${os}`);
-    
             // Detect the OS type with case-insensitive matching because MacOS is werid
             if(os.toLowerCase().includes('macos')) {
                 isMacOS = true;
-                debug('isMacOS set to true');
             } else if(os.toLowerCase().includes('windows')) {
                 isWindows = true;
-                debug('isWindows set to true');
             } else {
                 isUnix = true;
-                debug('isunix set to true');
             }
     
-            debug(`MacOS: ${isMacOS}, Windows: ${isWindows}, Linux/Other: ${isUnix}`);
         }
     });
     
@@ -172,10 +165,8 @@ function RyuParseLogFile(logData) {
                 } else if(key === "settings.hypervisor") {
                     if(isMacOS) {
                         setValue('settings.hypervisor', value);
-                        debug('Hypervisor setting applied for macOS:', value);
                     } else {
                         setValue('settings.hypervisor', 'N/A');
-                        debug('Hypervisor setting not applied for non-macOS');
                     }
                 } else {
                     setValue(key, value);
