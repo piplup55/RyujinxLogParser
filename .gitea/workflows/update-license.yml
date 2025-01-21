@@ -1,0 +1,68 @@
+name: Update License Date
+on:
+  workflow_dispatch:
+    inputs: { }
+  schedule:
+  - cron: 0 0 1 1 * # Every January 1st
+
+jobs:
+  update-date:
+    permissions:
+    contents: write
+    name: Update License Date
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.1.1
+
+      - name: Found last year date, replace, and push
+        shell: bash
+        run: |
+          sed -i "s/$(date -d 'last year' +%Y)/$(date +%Y)/g" License.md
+
+      - name: Set Git User Info
+        run: |
+          git config --global user.name "PiplupHelper"
+          git config --global user.email "pipluphelper@raychu.xyz"
+
+      - name: Import GPG Signing Key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | awk '{print $2}' | cut -d'/' -f2)
+          git config --global user.signingkey "$KEY_ID"
+          git config --global commit.gpgSign true
+
+      - name: Extract Repo Owner and Name
+        id: repo_info
+        run: |
+          # Extract Gitea repo owner and name from the remote URL
+          REMOTE_URL=$(git remote get-url origin)
+          echo "Remote URL: $REMOTE_URL"
+          
+          # Parse the owner and repo name dynamically from the URL
+          REPO_OWNER=$(echo "$REMOTE_URL" | sed -n 's|.*://[^/]*/\([^/]*\)/\([^/.]*\)\(\.git\)*|\1|p')
+          REPO_NAME=$(echo "$REMOTE_URL" | sed -n 's|.*://[^/]*/\([^/]*\)/\([^/.]*\)\(\.git\)*|\2|p')
+          
+          echo "REPO_OWNER=$REPO_OWNER" >> $GITHUB_ENV
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+          echo "Repo owner: $REPO_OWNER, Repo name: $REPO_NAME"
+
+      - name: Commit and Push Changes
+        env:
+          GITEA_PAT: ${{ secrets.HELPER_PAT }}
+        run: |       
+          REMOTE_URL=$(git remote get-url origin)
+          BASE_URL=$(echo "$REMOTE_URL" | sed -n 's|.*://\([^/]*\)/.*|\1|p')
+
+          echo "Detected BASE_URL: $BASE_URL"
+
+          # Use dynamically extracted repo owner and name
+          REPO_URL=https://${GITEA_PAT}@${BASE_URL}/${REPO_OWNER}/${REPO_NAME}.git
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+          # Stage, commit, and push changes
+          git add License.md
+          git commit -m "chore(license) Update License Date"
+          git push $REPO_URL HEAD:$BRANCH
