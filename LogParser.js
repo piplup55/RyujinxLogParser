@@ -91,7 +91,7 @@ function RyuParseLogFile(logData) {
         { key: 'settings.memorymode', pattern: 'MemoryManagerMode set to:', splitBy: 'MemoryManagerMode set to:'},
         { key: 'settings.multiplayermode', pattern: 'MultiplayerMode set to:', splitBy: 'MultiplayerMode set to:' },
         { key: 'settings.dram', patterns: 'DramSize set to:', splitBy: 'DramSize set to:' },
-        { key: 'emu_info.ryu_version', pattern: /(Ryujinx (?:Canary )?Version:)/, splitBy: /Ryujinx (?:Canary )?Version:/ },
+        { key: 'emu_info.ryu_version', pattern: 'Ryujinx Version:', splitBy: 'Ryujinx Version:' },
         { key: 'emu_info.ryu_firmware', pattern: 'Firmware Version:', splitBy: 'Firmware Version:' },
         { key: 'game_info.error', pattern: '|E|', splitBy: undefined },
         // Note Patterns
@@ -101,10 +101,10 @@ function RyuParseLogFile(logData) {
         { key: 'settings.applets', pattern: 'IgnoreApplet set to:', splitBy: 'IgnoreApplet set to:' }
     ];
     const notes = [
-        { key: 'firmware', condition: () => !analysedLog.game_info.game_name === 'Unknown' && !match.includes('Using Firmware Version:'), message: '**❌ Nintendo Switch firmware not found**' },
+        // TODO Fix this check fully
+        //{ key: 'firmware', condition: () => !analysedLog.game_info.game_name === 'Unknown' && !match.includes('Using Firmware Version:'), message: '**❌ Nintendo Switch firmware not found**' },
         { key: 'amdopengl', condition: () => analysedLog.settings.graphics_backend.includes('OpenGl') && analysedLog.hardware_info.gpu.includes('AMD') && analysedLog.hardware_info.os.includes('Windows'), message: '**⚠️ AMD GPU users should consider using Vulkan graphics backend**' },
         { key: 'intelopengl', condition: () => analysedLog.settings.graphics_backend.includes('OpenGl') && analysedLog.hardware_info.gpu.includes('Intel') && analysedLog.hardware_info.os.includes('Windows'), message: '**⚠️ Intel GPU users should consider using Vulkan graphics backend**' },
-        { key: 'intelmac', condition: () => analysedLog.hardware_info.cpu.includes('Intel') && analysedLog.hardware_info.os.includes('macOS'), message: '**🔴 Intel macs aren\'t offically supported**' },
         { key: 'rosetta', match: 'VirtualApple', message: '🔴 **Rosetta should be disabled**' },
         { key: 'debuglogs', condition: () => analysedLog.emu_info.logs.includes('Debug'), message: '⚠️ **Debug logs enabled will have a negative impact on performance**' },
         { key: 'dummyaudio', condition: () => analysedLog.settings.audio_backend === 'Dummy', message: '⚠️ Dummy audio backend, consider changing to SDL2 or OpenAL' },
