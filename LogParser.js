@@ -26,35 +26,38 @@
     THE SOFTWARE.
 */
 const { EmbedBuilder } = require('discord.js');
+const { trimCpuString } = require('./LogExtras.js')
 
 function RyuParseLogFile(logData) {
     // Initialize the output object
     const analysedLog = {
         game_info: {
             game_name: 'Unknown',
+            warning: 'No wariings found in log',
             error: 'No errors found in log',
             mods: [],
             cheats: [],
         },
         hardware_info: {
-            cpu: 'N/A',
-            gpu: 'N/A',
-            ram: 'N/A',
-            os: 'N/A',
+            cpu: 'Unknown',
+            gpu: 'Unknown',
+            ram: 'Unknown',
+            os: 'Unknown',
         },
         settings: {
-            audio_backend: 'N/A',
-            docked: 'N/A',
-            pptc: 'N/A',
-            shader_cache: 'N/A',
-            vsync: 'N/A',
-            hypervisor: 'N/A',
-            graphics_backend: 'N/A',
-            resolution_scale: 'N/A',
-            anisotropic_filtering: 'N/A',
-            aspect_ratio: 'N/A',
-            texture_recompression: 'N/A',
-            multiplayermode: 'N/A',
+            audio_backend: 'Unknown',
+            docked: 'Unknown',
+            pptc: 'Unknown',
+            shader_cache: 'Unknown',
+            vsync: 'Unknown',
+            hypervisor: 'Unknown',
+            graphics_backend: 'Unknown',
+            resolution_scale: 'Unknown',
+            anisotropic_filtering: 'Unknown',
+            aspect_ratio: 'Unknown',
+            texture_recompression: 'Unknown',
+            multiplayermode: 'Unknown',
+            dram: 'Unknown',
         },
         emu_info: {
             ryu_version: 'Unknown',
@@ -85,10 +88,42 @@ function RyuParseLogFile(logData) {
         { key: 'settings.anisotropic_filtering', pattern: 'MaxAnisotropy set to:', splitBy: 'MaxAnisotropy set to:' },
         { key: 'settings.aspect_ratio', pattern: 'AspectRatio set to:', splitBy: 'AspectRatio set to:' },
         { key: 'settings.texture_recompression', pattern: 'TextureRecompression set to:', splitBy: 'TextureRecompression set to:' },
+        { key: 'settings.memorymode', pattern: 'MemoryManagerMode set to:', splitBy: 'MemoryManagerMode set to:'},
         { key: 'settings.multiplayermode', pattern: 'MultiplayerMode set to:', splitBy: 'MultiplayerMode set to:' },
-        { key: 'emu_info.ryu_version', pattern: 'Ryujinx Version:', splitBy: 'Ryujinx Version:' },
+        { key: 'settings.dram', patterns: 'DramSize set to:', splitBy: 'DramSize set to:' },
+        { key: 'emu_info.ryu_version', pattern: /(Ryujinx (?:Canary )?Version:)/, splitBy: /Ryujinx (?:Canary )?Version:/ },
         { key: 'emu_info.ryu_firmware', pattern: 'Firmware Version:', splitBy: 'Firmware Version:' },
-        { key: 'game_info.error', pattern: '|E|', splitBy: '|E|' }
+        { key: 'game_info.error', pattern: '|E|', splitBy: undefined },
+        // Note Patterns
+        { key: 'settings.services', pattern: 'IgnoreMissingServices set to:', splitBy: 'IgnoreMissingServices set to:'},
+        { key: 'settings.checks', pattern: 'EnableFsIntegrityChecks set to:', splitBy: 'EnableFsIntegrityChecks set to:'},
+        { key: 'emu_info.logs', pattern: 'Logs Enabled:', splitBy: 'Logs Enabled:' },
+        { key: 'settings.applets', pattern: 'IgnoreApplet set to:', splitBy: 'IgnoreApplet set to:' }
+    ];
+    const notes = [
+        { key: 'firmware', condition: () => !analysedLog.game_info.game_name === 'Unknown' && !match.includes('Using Firmware Version:'), message: '**❌ Nintendo Switch firmware not found**' },
+        { key: 'amdopengl', condition: () => analysedLog.settings.graphics_backend.includes('OpenGl') && analysedLog.hardware_info.gpu.includes('AMD') && analysedLog.hardware_info.os.includes('Windows'), message: '**⚠️ AMD GPU users should consider using Vulkan graphics backend**' },
+        { key: 'intelopengl', condition: () => analysedLog.settings.graphics_backend.includes('OpenGl') && analysedLog.hardware_info.gpu.includes('Intel') && analysedLog.hardware_info.os.includes('Windows'), message: '**⚠️ Intel GPU users should consider using Vulkan graphics backend**' },
+        { key: 'intelmac', condition: () => analysedLog.hardware_info.cpu.includes('Intel') && analysedLog.hardware_info.os.includes('macOS'), message: '**🔴 Intel macs aren\'t offically supported**' },
+        { key: 'rosetta', match: 'VirtualApple', message: '🔴 **Rosetta should be disabled**' },
+        { key: 'debuglogs', condition: () => analysedLog.emu_info.logs.includes('Debug'), message: '⚠️ **Debug logs enabled will have a negative impact on performance**' },
+        { key: 'dummyaudio', condition: () => analysedLog.settings.audio_backend === 'Dummy', message: '⚠️ Dummy audio backend, consider changing to SDL2 or OpenAL' },
+        { key: 'pptc', condition: () => analysedLog.settings.pptc === 'False', message: '🔴 **PPTC cache should be enabled**' },
+        { key: 'shadercache', condition: () => analysedLog.settings.shader_cache === 'False', message: '🔴 **Shader cache should be enabled**' },
+        { key: 'softwarememory', condition: () => analysedLog.settings.memorymode === 'SoftwarePageTable', message: '🔴 **`Software` setting in Memory Manager Mode will give slower performance than the default setting of `Host unchecked`**' },
+        { key: 'missingservices', condition: () => analysedLog.settings.services === 'True', message: '⚠️ `Ignore Missing Services` being enabled can cause instability' },
+        { key: 'fschecks', condition: () => analysedLog.settings.checks === 'False', message: '⚠️ Disabling file integrity checks may cause corrupted dumps to not be detected' },
+        { key: 'vsync', condition: () => analysedLog.settings.vsync === 'False', message: '⚠️ V-Sync disabled can cause instability like games running faster than intended or longer load times' },
+        { key: 'IgnoreApplet', condition: () => analysedLog.settings.applets === 'True', message: '⚠️ `Ignore Applets` can cause instability like games not functioning corrently' },
+        { key: 'hasherror', match: '(2002-4604): Hash error!', message: '⚠️ Dump error detected. Investigate possible bad game/firmware dump issues' },
+        { key: 'gamecrashed', regex: /\(ResultErrApplicationAborted \(\d{4}-\d{4}\)\)/, message: '🔴 The game itself crashed' },
+        { key: 'missingkeys', match: 'MissingKeyException', message: '⚠️ Keys or firmware out of date, consider updating them' },
+        { key: 'permerror', match: 'ResultFsPermissionDenied (2002-6400)', message: '⚠️ File permission error. Consider deleting save directory and allowing Ryujinx to make a new one' },
+        { key: 'fstargeterror', match: 'ResultFsTargetNotFound (2002-1002)', message: '⚠️ Save not found error. Consider starting game without a save file or using a new save file' },
+        { key: 'serviceerror', match: 'ServiceNotImplementedException', message: '⚠️ Consider enabling `Ignore Missing Services` in Ryujinx settings' },
+        { key: 'vramerror', match: 'ErrorOutOfDeviceMemory', message: '⚠️ Consider enabling `Texture Recompression` in Ryujinx settings' },
+        { key: 'defaultprofile', match: 'UserId: 00000000000000010000000000000000', message: '⚠️ Default user profile in use, consider creating a custom one.' },
+        { key: 'savedataindex', match: 'ResultKvdbInvalidKeyValue (2020-0005)', message: '🔴 **Savedata index for the game maybe corrupted**' }
     ];
 
     // function to parse the pattrens
@@ -102,11 +137,29 @@ function RyuParseLogFile(logData) {
         obj[keys[0]] = value.trim();
     };
 
+    const parseNotes = (lines) => {
+        notes.forEach(({ match, condition, regex, message }) => {
+            if (condition && condition()) {
+                analysedLog.log_info.notes.unshift(message);
+            } else if (match && lines.some(line => line.includes(match))) {
+                analysedLog.log_info.notes.unshift(message);
+            } else if (regex && lines.some(line => regex.test(line))) {
+                analysedLog.log_info.notes.unshift(message);
+            }
+        });
+        analysedLog.log_info.notes = [...new Set(analysedLog.log_info.notes)];
+    };
+
     const convertGiBtoMiB = (gib) => {
         return Math.round(parseFloat(gib) * 1024);
     };
 
+    // Split log data into lines
     const lines = logData.split('\n');
+    const totalLines = lines.length;
+    // Extract the first X and last X lines to stop abuse from large files
+    const firstXLines = lines.slice(0, 34);
+
     let modsCount = 0;
     let cheatsCount = 0;
     let controllersConfigured = '';
@@ -123,47 +176,54 @@ function RyuParseLogFile(logData) {
         00:00:00.183 |N| Application PrintSystemInfo: Ryujinx Version: 1.1.1403
         00:00:00.185 |N| Application Print: Operating System: macOS 14.4.0 (23E214)
 */
-    lines.forEach(line => {
+    firstXLines.forEach(line => {
         if (line.includes('Operating System:')) {
             const os = line.split('Operating System:')[1].trim();
-            analysedLog.hardware_info.os = os;
-    
-            // Detect the OS type with case-insensitive matching because MacOS is werid
-            if(os.toLowerCase().includes('macos')) {
+
+            // Determine OS type with case-insensitive matching
+            const osLower = os.toLowerCase();
+            if (osLower.includes('macos')) {
                 isMacOS = true;
-            } else if(os.toLowerCase().includes('windows')) {
+            } else if (osLower.includes('windows')) {
                 isWindows = true;
             } else {
                 isUnix = true;
             }
-    
         }
     });
-    
+
     //Refer to the comment on line 118-126
     lines.forEach(line => {
-        for(const { key, pattern, splitBy } of patterns) {
-            if(line.includes(pattern)) {
-                const value = line.split(splitBy)[1].trim();
-            
+        for (const { key, pattern, splitBy } of patterns) {
+            if ((typeof pattern === 'string' && line.includes(pattern)) || 
+                (pattern instanceof RegExp && pattern.test(line))) {
+                
+                let value;
+                if (splitBy === undefined) {
+                    value = line;
+                } else {
+                    // Use regex if `splitBy` is a RegExp, otherwise split as usual
+                    value = splitBy instanceof RegExp ? line.split(splitBy)[1]?.trim() : line.split(splitBy)[1]?.trim();
+                }
+        
                 // Special handling for GPU information to avoid parsing GPU memory
-                if(key === 'hardware_info.gpu') {
-                    if(!value.includes("GPU Memory")) {
-                        setValue(key, value);
-                    }
-                }                
-                else if(key === "hardware_info.ram") {
+                if (key === 'hardware_info.gpu' && value.includes("GPU Memory")) {
+                    continue
+                } else if (key === "hardware_info.ram") {
                     const totalMatch = line.match(/Total\s+([\d.]+)\s*GiB/);
                     const availableMatch = line.match(/Available\s+([\d.]+)\s*GiB/);
-                    if(totalMatch && availableMatch) {
+                    if (totalMatch && availableMatch) {
                         const totalGiB = totalMatch[1];
                         const availableGiB = availableMatch[1];
                         const totalMiB = convertGiBtoMiB(totalGiB);
                         const availableMiB = convertGiBtoMiB(availableGiB);
+
+                        if(availableMiB < 8192) analysedLog.log_info.notes.push(`⚠️ Less than 8gb of ram available (${availableMiB}MiB)`)
+
                         analysedLog.hardware_info.ram = `${availableMiB}/${totalMiB}`;
                     }
-                } else if(key === "settings.hypervisor") {
-                    if(isMacOS) {
+                } else if (key === "settings.hypervisor") {
+                    if (isMacOS) {
                         setValue('settings.hypervisor', value);
                     } else {
                         setValue('settings.hypervisor', 'N/A');
@@ -188,48 +248,35 @@ function RyuParseLogFile(logData) {
             }
         } else if(line.includes('Hid Configure:')) {
             controllersConfigured = line.split('Hid Configure:')[1].trim();
-        } else if(line.includes('Logs Enabled: Info, Warning, Error, Guest, Stub')) {
-            analysedLog.log_info.notes.push(`✅ Default Logs Enabled`);
         }
-        
-
-        // Continuously store the current line as the last line
-        analysedLog.log_info.last_line = line.trim();
     });
 
     // Add additional mods or cheats count if more than 5
-    if (modsCount > 5) {
-        analysedLog.game_info.mods.push(`:scissors: ${modsCount - 5} other mods`);
-    }
-    if (cheatsCount > 5) {
-        analysedLog.game_info.cheats.push(`:scissors: ${cheatsCount - 5} other cheats`);
-    }
+    if (modsCount > 5) { analysedLog.game_info.mods.push(`:scissors: ${modsCount - 5} other mods`); }
+    if (cheatsCount > 5) { analysedLog.game_info.cheats.push(`:scissors: ${cheatsCount - 5} other cheats`); }
 
     // Add default messages if no mods or cheats are found
-    if (modsCount === 0) {
-        analysedLog.game_info.mods.push("No Mods found");
-    }
-    if (cheatsCount === 0) {
-        analysedLog.game_info.cheats.push("No Cheats found");
-    }
+    if (modsCount === 0) { analysedLog.game_info.mods.push("No Mods found"); }
+    if (cheatsCount === 0) { analysedLog.game_info.cheats.push("No Cheats found"); }
 
     // Add controller information to notes
-    analysedLog.log_info.notes.unshift(`:information_source: ${controllersConfigured}`);
+    if(controllersConfigured) { analysedLog.log_info.notes.push(`:information_source: ${controllersConfigured}`); } else 
+                              { analysedLog.log_info.notes.push(`:warning: Unable to detect any controllers`); }
 
-    /*
-        Extract time elapsed from the last line
-        i never got around to fiixing this but it's good enough for me - Piplup
-    */
-    const timeElapsedMatch = analysedLog.log_info.last_line.match(/^(\d{2}:\d{2}:\d{2}\.\d{3})/);
-    if (timeElapsedMatch) {
-        analysedLog.log_info.notes.push(`:information_source: Time Elapsed: ${timeElapsedMatch[1]}`);
-    }
+    parseNotes(lines);
 
     return analysedLog;
 }
 
 function RyuCreateEmbed(analysedLog, author) {
-    const cleanName = (name = 'Unknown', pattern = '') => name.replace(pattern, '');
+    const cleanName = (name = 'Unknown', pattern = '') => {
+        if (typeof pattern === 'string') {
+            return name.replace(pattern, '').trim(); // Simple replacement for strings
+        } else if (pattern instanceof RegExp) {
+            return name.replace(pattern, '').trim(); // Regex replacement
+        }
+        return name.trim(); // Default fallback with trimming
+    };
     const getMode = (setting, trueValue = "Enabled", falseValue = "Disabled") => setting === "True" ? trueValue : falseValue;
     const getMappingValue = (mappings, key, defaultValue = 'N/A') => mappings[key] || defaultValue;
 
@@ -256,7 +303,7 @@ function RyuCreateEmbed(analysedLog, author) {
         "-1": "Auto",
     };
 
-    const hardwareInfo = `**CPU:** ${cleanName(analysedLog.hardware_info.cpu, /\s\[logical\]$/)} | **GPU:** ${analysedLog.hardware_info.gpu} | **RAM:** ${analysedLog.hardware_info.ram} MiB | **OS:** ${analysedLog.hardware_info.os}`;
+    const hardwareInfo = `**CPU:** ${trimCpuString(analysedLog.hardware_info.cpu)} | **GPU:** ${analysedLog.hardware_info.gpu} | **RAM:** ${analysedLog.hardware_info.ram} MiB | **OS:** ${analysedLog.hardware_info.os}`;
 
     const systemSettingsInfo = `
         **Audio Backend:** \`${analysedLog.settings.audio_backend}\`
@@ -264,7 +311,7 @@ function RyuCreateEmbed(analysedLog, author) {
         **PPTC Cache:** \`${getMode(analysedLog.settings.pptc)}\`
         **Shader Cache:** \`${getMode(analysedLog.settings.shader_cache)}\`
         **V-Sync:** \`${getMode(analysedLog.settings.vsync)}\`
-        **Hypervisor:** \`${analysedLog.settings.hypervisor}\`
+        **Hypervisor:** \`${getMode(analysedLog.settings.hypervisor)}\`
         **LDN Mode:** \`${analysedLog.settings.multiplayermode}\`
     `.trim();
 
@@ -282,14 +329,15 @@ function RyuCreateEmbed(analysedLog, author) {
         { name: "General Info", value: `${ryujinxInfo} | ${hardwareInfo}`, inline: false },
         { name: "System Settings", value: systemSettingsInfo, inline: true },
         { name: "Graphics Settings", value: graphicsSettingsInfo, inline: true },
-        { name: "Latest Error Snippet", value: `\`\`\`${analysedLog.game_info.error || "No errors found in log"}\`\`\``, inline: false },
+        analysedLog.game_info.error ? { name: "Latest Error Snippet", value: `\`\`\`${analysedLog.game_info.error}\`\`\``, inline: false } : { name: "Latest Error Snippet", value: `No errors found in log`, inline: false },
+        analysedLog.game_info.game_name === "Unknown" ? { name: "No Game Boot Detected", value: `No game boot has been detected in the log file. To get a proper log, follow these steps:\n1) In Logging settings, ensure **Enable Logging to File** is checked.\n2) Ensure the following default logs are enabled: **Info**, **Warning**, **Error**, **Guest**, and **Stub**.\n3) Start a game up.\n4) Play until your issue occurs.\n5) Upload the latest log file which is larger than **3KB**.`, inline: false } : null,
         { name: "Mods", value: analysedLog.game_info.mods.join("\n") || "No Mods found", inline: false },
         { name: "Cheats", value: analysedLog.game_info.cheats.join("\n") || "No Cheats found", inline: false },
         { name: "Notes", value: analysedLog.log_info.notes.join("\n") || "No notes", inline: false }
-    ];
+    ].filter(Boolean);
 
     const logEmbed = new EmbedBuilder()
-        .setTitle(cleanName(analysedLog.game_info.game_name, /\s\[(64|32)-bit\]$/))
+        .setTitle(`${cleanName(analysedLog.game_info.game_name, /\s\[(64|32)-bit\]$/)}`)
         .setColor(0x1e90ff)
         .addFields(fields)
         .setFooter({ text: `Log uploaded by ${author.username}`, iconURL: author.displayAvatarURL({ size: 4096, dynamic: true }) });
@@ -300,5 +348,5 @@ function RyuCreateEmbed(analysedLog, author) {
 
 module.exports = {
     RyuParseLogFile,
-    RyuCreateEmbed
+    RyuCreateEmbed,
 }
